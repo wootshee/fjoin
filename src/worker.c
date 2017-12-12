@@ -7,7 +7,9 @@ license that can be found in the LICENSE file.
 #include "worker.h"
 #include "fd.h"
 
-int start_worker(int delim, const char* cmd[], worker *w) {
+#include <stdlib.h>
+
+int start_worker(int delim, char* cmd[], worker *w) {
   int pipes[3][2];
   int i, j;
   for (i = STDIN_FILENO; i <= STDERR_FILENO; ++i) {

@@ -4,6 +4,8 @@ Use of this source code is governed by MIT
 license that can be found in the LICENSE file.
 */
 
+#include <config.h>
+
 #include "fd.h"
 #include "worker.h"
 
@@ -152,7 +154,7 @@ int fork_input(worker* workers, int num) {
     Distribute input lines to worker processes in round-robin manner
   */
 
-  while (line = fgetln(input, &size)) {
+  while ((line = fgetln(input, &size)) != NULL) {
     written = fwrite(line, 1, size, workers[i].fd[STDIN_FILENO]);
     if (written != (ssize_t) size) {
         break;
@@ -164,7 +166,7 @@ int fork_input(worker* workers, int num) {
     }
   }
   
-  if (!line && ferror(input) || ferror(workers[i].fd[STDIN_FILENO])) {
+  if ((!line && ferror(input)) || ferror(workers[i].fd[STDIN_FILENO])) {
     res = 1;
     perror("fork_input()");
   }
