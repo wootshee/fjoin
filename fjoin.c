@@ -46,15 +46,16 @@ int copy_output(FILE* src, FILE* dst) {
 }
 
 int join_output(int parent_err, worker* workers, int num) {
-  int i, res;
+  int i, res = 0;
   char* buf = NULL;
+  int eofed = 0;
 
   FILE* perr;
 
   if (!(perr = fdopen(parent_err, "r"))) {
     perror("Cannot open parent STDERR");
     res = -1;
-  } else for (;;) {
+  } else while (eofed < num) {
     int nfds, out, err;
     fd_set fdread;
     fd_set fderr;
@@ -90,20 +91,28 @@ read_output:
     }
     /* Check parent STDERR */
     if (FD_ISSET(parent_err, &fdread) || FD_ISSET(parent_err, &fderr)) {
-      if (-1 == copy_output(perr, stderr)) {
+      if ((res = copy_output(perr, stderr)) == -1) {
         break;
       }
       continue;
     }
     /* Check worker STDERR */
     if (FD_ISSET(err, &fdread) || FD_ISSET(err, &fderr)) {
-       if (-1 == copy_output(err, stderr)) {
+      if (feof(workers[i].fd[STDERR_FILENO])) {
+        ++eofed;
+        break;
+      }
+      if ((res = copy_output(workers[i].fd[STDERR_FILENO], stderr)) == -1) {
         break;
       }
     }
     /* Check worker STDOUT */
     if (FD_ISSET(out, &fdread) || FD_ISSET(out, &fderr)) {
-       if (-1 == copy_output(out, stdout)) {
+      if (feof(workers[i].fd[STDOUT_FILENO])) {
+        ++eofed;
+        break;
+      }
+      if ((res = copy_output(workers[i].fd[STDOUT_FILENO], stdout)) == -1) {
         break;
       }
     }
@@ -116,6 +125,10 @@ read_output:
   if (perr) fclose(perr);
 
   for (i = 0; i < num; ++i) {
+    /* 
+      Since STDIN pipes are not inherited by join process,
+      close only STDOUT and STDERR streams
+    */
     fclose(workers[i].fd[STDOUT_FILENO]);
     fclose(workers[i].fd[STDERR_FILENO]);
   }
@@ -129,6 +142,11 @@ int fork_input(worker* workers, int num) {
   char* line;
   size_t size;
   ssize_t written;
+
+  for (i = 0; i < num; ++i) {
+    fclose(workers[i].fd[STDERR_FILENO]);
+    fclose(workers[i].fd[STDOUT_FILENO]);
+  }
 
   /*
     Distribute input lines to worker processes in round-robin manner
@@ -232,21 +250,6 @@ cleanup:
     free(getdelim_buf);
   }
   free(workers);
-
-  for (i = 0; i < numchild; ++i) {
-    int r;
-    r = close(children[i].in);
-    r = fclose(children[i].out);
-    r = fclose(children[i].err);
-    waitpid(children[i].pid, &r, 0);
-    if (!(WIFEXITED(r))) {
-      res = 1;
-    } else if (WEXITSTATUS(r) != 0) {
-      res = WEXITSTATUS(r);
-    }
-  }
-  free(workers);
-
   return res;
 }
 
