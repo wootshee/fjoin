@@ -7,14 +7,12 @@ license that can be found in the LICENSE file.
 #include "worker.h"
 #include "fd.h"
 
-#include <error.h>
-
-int start_worker(const char* cmd[], worker *w) {
+int start_worker(int delim, const char* cmd[], worker *w) {
   int pipes[3][2];
   int i, j;
   for (i = STDIN_FILENO; i <= STDERR_FILENO; ++i) {
     if (-1 == pipe(pipes[j])) {
-      perror(stderr, "Cannot create pipe");
+      perror("Cannot create pipe");
       goto errexit;
     }
   }
@@ -86,7 +84,7 @@ errexit:
     if (w->fd[j]) {
       /* Pipe has been fdopen'ed */
       fclose(w->fd[j]);
-    } else if pipes[j][0] != -1 {
+    } else if (pipes[j][0] != -1) {
       close(pipes[j][0]);
     } else {
       close(pipes[j][1]);

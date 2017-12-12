@@ -7,6 +7,7 @@ license that can be found in the LICENSE file.
 #include "fd.h"
 
 #include <fcntl.h>
+#include <unistd.h>
 
 int redirect(int src, int dst) {
   int res = dup2(src, dst);

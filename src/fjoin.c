@@ -159,7 +159,7 @@ int fork_input(worker* workers, int num) {
     }
     /* switch to next child process */
     ++i;
-    if (i == workers) {
+    if (i == num) {
       i = 0;
     }
   }
@@ -192,7 +192,7 @@ int run(int argc, char* argv[]) {
     Run worker processes with their stdin, stdout and stderr redirected to pipes
   */
   for (i = 0; i < numchild; ++i) {
-    if (0 != start_worker(argv, &workers[i])) {
+    if (0 != start_worker(delim, argv, &workers[i])) {
       fprintf(stderr, "Cannot start worker process\n");
       goto cleanup;
     }

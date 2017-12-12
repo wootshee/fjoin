@@ -15,6 +15,6 @@ typedef struct _worker {
     FILE* fd[3];
 } worker;
 
-int start_worker(const char* cmd[], worker *w);
+int start_worker(int delim, const char* cmd[], worker *w);
 
 #endif
