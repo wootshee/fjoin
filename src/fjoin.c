@@ -18,7 +18,7 @@ license that can be found in the LICENSE file.
 #include <sys/select.h>
 
 static int delim = '\n';
-static int numchild = 0;
+static int numchild = 1;
 static int print_delim = 1;
 static FILE* input = NULL;
 static char* getdelim_buf = NULL;
@@ -28,11 +28,12 @@ void usage() {
   fprintf(stderr, "Usage: fjoin [-c forks] [-d delimeter] [-f input file] [-n] program [args]\n");
 }
 
-int copy_output(FILE* src, FILE* dst) {
+ssize_t copy_output(FILE* src, FILE* dst) {
   ssize_t in_size = 0;
   size_t size = 0, written = 0;
 
   in_size = getdelim(&getdelim_buf, &getdelim_buf_size, delim, src);
+
   if (in_size > 0) {
     if (!print_delim && getdelim_buf[in_size-1] == delim) {
       /* exlude delimiter from output */
@@ -42,13 +43,15 @@ int copy_output(FILE* src, FILE* dst) {
     if (written != (size_t) in_size) {
       return -1;
     }
+    return written;
+  } else if (feof(src)) {
     return 0;
   }
-  return -1;
+  return in_size;
 }
 
 int join_output(int parent_err, worker* workers, int num) {
-  int i, res = 0;
+  int i = 0, res = 0;
   char* buf = NULL;
   int eofed = 0;
 
@@ -57,21 +60,18 @@ int join_output(int parent_err, worker* workers, int num) {
   if (!(perr = fdopen(parent_err, "r"))) {
     perror("Cannot open parent STDERR");
     res = -1;
-  } else while (eofed < num) {
+  } else while (res >= 0 && eofed < num) {
     int nfds, out, err;
     fd_set fdread;
-    fd_set fderr;
-
+    fprintf(stderr, "J0:%d\n", i);
     out = fileno(workers[i].fd[STDOUT_FILENO]);
     err = fileno(workers[i].fd[STDERR_FILENO]);
     FD_ZERO(&fdread);
-    FD_ZERO(&fderr);
     FD_SET(out, &fdread);
     FD_SET(err, &fdread);
-    FD_SET(parent_err, &fdread);
-    FD_SET(out, &fderr);
-    FD_SET(err, &fderr);
-    FD_SET(parent_err, &fderr);
+    if (parent_err != -1) {
+      FD_SET(parent_err, &fdread);
+    }
     nfds = parent_err;
     if (err > nfds) {
       nfds = err;
@@ -81,40 +81,52 @@ int join_output(int parent_err, worker* workers, int num) {
     }
     nfds++;
 read_output:
-    while ((res = select(nfds, &fdread, NULL, &fderr, NULL)) == 0) {
-      if (errno == EAGAIN) {
-        sleep(1);
-      } else {
-        break;
+    while ((res = select(nfds, &fdread, NULL, NULL, NULL)) == -1) {
+      switch(errno) {
+        case EAGAIN: 
+          sleep(1);
+        case EINTR:
+          continue;
+        default:
+          break;
       }
     }
+    fprintf(stderr, "J1:%d\n", res);
     if (res == -1) {
       break;
     }
     /* Check parent STDERR */
-    if (FD_ISSET(parent_err, &fdread) || FD_ISSET(parent_err, &fderr)) {
-      if ((res = copy_output(perr, stderr)) == -1) {
+    if (FD_ISSET(parent_err, &fdread)) {
+      fprintf(stderr, "J2\n");
+      res = copy_output(perr, stderr);
+      if (res == 0) {
+        /*
+          parent stderr is fully consumed - exclude it from further I/O processing
+        */
+        parent_err = -1;
+        continue;
+      } else if (res < 0) {
         break;
       }
       continue;
     }
     /* Check worker STDERR */
-    if (FD_ISSET(err, &fdread) || FD_ISSET(err, &fderr)) {
-      if (feof(workers[i].fd[STDERR_FILENO])) {
+    if (FD_ISSET(err, &fdread)) {
+      fprintf(stderr, "J3\n");
+      res = copy_output(workers[i].fd[STDERR_FILENO], stderr);
+      if (res == 0) {
         ++eofed;
-        break;
-      }
-      if ((res = copy_output(workers[i].fd[STDERR_FILENO], stderr)) == -1) {
+      } else if(res < 0) {
         break;
       }
     }
     /* Check worker STDOUT */
-    if (FD_ISSET(out, &fdread) || FD_ISSET(out, &fderr)) {
-      if (feof(workers[i].fd[STDOUT_FILENO])) {
+    if (FD_ISSET(out, &fdread)) {
+      fprintf(stderr, "J4\n");
+      res = copy_output(workers[i].fd[STDOUT_FILENO], stdout);
+      if (res == 0) {
         ++eofed;
-        break;
-      }
-      if ((res = copy_output(workers[i].fd[STDOUT_FILENO], stdout)) == -1) {
+      } else if(res < 0) {
         break;
       }
     }
@@ -149,6 +161,8 @@ int fork_input(worker* workers, int num) {
     fclose(workers[i].fd[STDERR_FILENO]);
     fclose(workers[i].fd[STDOUT_FILENO]);
   }
+
+  i = 0;
 
   /*
     Distribute input lines to worker processes in round-robin manner
@@ -231,14 +245,18 @@ int run(int argc, char* argv[]) {
     close(STDIN_FILENO);
     close(err_pipe[1]);
     res = join_output(err_pipe[0], workers, numchild);
+    fflush(stdout);
+    fprintf(stderr, "res = %d,%d\n", res, errno);
   } else {
     int r;
     close(STDOUT_FILENO);
+    close(err_pipe[0]);
     if (-1 == redirect(err_pipe[1], STDERR_FILENO)) {
       perror("Cannot redirect STDERR to output join process");
       goto cleanup;
     }
     res = fork_input(workers, numchild);
+    fclose(stderr);
     waitpid(pid_join, &r, 0);
     if (!(WIFEXITED(r))) {
       res = 1;

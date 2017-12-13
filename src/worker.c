@@ -13,7 +13,7 @@ int start_worker(int delim, char* cmd[], worker *w) {
   int pipes[3][2];
   int i, j;
   for (i = STDIN_FILENO; i <= STDERR_FILENO; ++i) {
-    if (-1 == pipe(pipes[j])) {
+    if (-1 == pipe(pipes[i])) {
       perror("Cannot create pipe");
       goto errexit;
     }
