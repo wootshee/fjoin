@@ -49,33 +49,25 @@ int start_worker(int delim, char* cmd[], worker *w) {
 
   /* Close unused ends of pipes */
   close(pipes[STDIN_FILENO][0]);
-  pipes[STDIN_FILENO][0] = -1;
   close(pipes[STDOUT_FILENO][1]);
-  pipes[STDOUT_FILENO][1] = -1;
   close(pipes[STDERR_FILENO][1]);
-  pipes[STDERR_FILENO][1] = -1;
+
+  /* Initialize standard streams */
+  w->streams[STDIN_FILENO].fd = pipes[STDIN_FILENO][1];
+  w->streams[STDOUT_FILENO].fd = pipes[STDOUT_FILENO][0];
+  w->streams[STDERR_FILENO].fd = pipes[STDERR_FILENO][0];
+
   /*
     Every child process must inherit only the file descriptors used for communication between
     the child process and its parent. Descriptors used for communication with other children
     must not be inherited to prevent deadlocks.
   */
   if (
-    -1 == clo_exec(pipes[STDIN_FILENO][1], 1) ||
-    -1 == clo_exec(pipes[STDOUT_FILENO][0], 1) ||
-    -1 == clo_exec(pipes[STDERR_FILENO][0], 1)
+    -1 == clo_exec(w->streams[STDIN_FILENO].fd, 1) ||
+    -1 == clo_exec(w->streams[STDOUT_FILENO].fd, 1) ||
+    -1 == clo_exec(w->streams[STDERR_FILENO].fd, 1)
   ) {
     perror("Cannot change pipe mode");
-    goto errexit;
-  }
-  /*
-    Use buffered I/O on pipes
-  */
-  if (
-    NULL == (w->fd[STDIN_FILENO] = fdopen(pipes[STDIN_FILENO][1], "w")) ||
-    NULL == (w->fd[STDOUT_FILENO] = fdopen(pipes[STDOUT_FILENO][0], "r")) ||
-    NULL == (w->fd[STDERR_FILENO] = fdopen(pipes[STDERR_FILENO][0], "r"))
-  ) {
-    perror("fdopen() error");
     goto errexit;
   }
 
@@ -83,14 +75,7 @@ int start_worker(int delim, char* cmd[], worker *w) {
   
 errexit:
   for (j = 0; j < i; ++j) {
-    if (w->fd[j]) {
-      /* Pipe has been fdopen'ed */
-      fclose(w->fd[j]);
-    } else if (pipes[j][0] != -1) {
-      close(pipes[j][0]);
-    } else {
-      close(pipes[j][1]);
-    }
+    close(w->streams[j].fd);
   }
   return -1;
 }

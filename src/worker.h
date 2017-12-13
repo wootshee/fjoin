@@ -11,8 +11,13 @@ license that can be found in the LICENSE file.
 #include <unistd.h>
 
 typedef struct _worker {
+    /* child process id */
     pid_t pid;
-    FILE* fd[3];
+    /* file descriptors or FILE pointers for standard streams */
+    union {
+        int   fd;
+        FILE* fp;
+    }  streams[3];
 } worker;
 
 int start_worker(int delim, char* cmd[], worker *w);
