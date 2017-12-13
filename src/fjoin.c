@@ -57,19 +57,40 @@ int join_output(int parent_err, worker* workers, int num) {
 
   FILE* perr;
 
+
   if (!(perr = fdopen(parent_err, "r"))) {
     perror("Cannot open parent STDERR");
     res = -1;
-  } else while (res >= 0 && eofed < num) {
+  } else for (i = 0; i < num; i++) {
+    /* convert file descriptors to buffered streams */
+    FILE* out;
+    FILE* err;
+
+    out = fdopen(workers[i].streams[STDOUT_FILENO].fd, "r");
+    if (!out) {
+      num = i;
+      goto cleanup;
+    }
+    err = fdopen(workers[i].streams[STDERR_FILENO].fd, "r");
+    if (!err) {
+      num = i;
+      fclose(out);
+      goto cleanup;
+    }
+    workers[i].streams[STDOUT_FILENO].fp = out;
+    workers[i].streams[STDERR_FILENO].fp = err;
+  }
+  
+  while (res >= 0 && eofed < num) {
     int nfds, out, err;
     fd_set fdread;
     fprintf(stderr, "J0:%d\n", i);
-    out = fileno(workers[i].fd[STDOUT_FILENO]);
-    err = fileno(workers[i].fd[STDERR_FILENO]);
+    out = fileno(workers[i].streams[STDOUT_FILENO].fp);
+    err = fileno(workers[i].streams[STDERR_FILENO].fp);
     FD_ZERO(&fdread);
     FD_SET(out, &fdread);
     FD_SET(err, &fdread);
-    if (parent_err != -1) {
+    if (perr) {
       FD_SET(parent_err, &fdread);
     }
     nfds = parent_err;
@@ -96,14 +117,16 @@ read_output:
       break;
     }
     /* Check parent STDERR */
-    if (FD_ISSET(parent_err, &fdread)) {
+    if (perr && FD_ISSET(parent_err, &fdread)) {
       fprintf(stderr, "J2\n");
       res = copy_output(perr, stderr);
       if (res == 0) {
         /*
           parent stderr is fully consumed - exclude it from further I/O processing
         */
-        parent_err = -1;
+        fclose(perr);
+        perr = NULL;
+        fprintf(stderr, "J21\n");
         continue;
       } else if (res < 0) {
         break;
@@ -113,7 +136,7 @@ read_output:
     /* Check worker STDERR */
     if (FD_ISSET(err, &fdread)) {
       fprintf(stderr, "J3\n");
-      res = copy_output(workers[i].fd[STDERR_FILENO], stderr);
+      res = copy_output(workers[i].streams[STDERR_FILENO].fp, stderr);
       if (res == 0) {
         ++eofed;
       } else if(res < 0) {
@@ -123,7 +146,7 @@ read_output:
     /* Check worker STDOUT */
     if (FD_ISSET(out, &fdread)) {
       fprintf(stderr, "J4\n");
-      res = copy_output(workers[i].fd[STDOUT_FILENO], stdout);
+      res = copy_output(workers[i].streams[STDOUT_FILENO].fp, stdout);
       if (res == 0) {
         ++eofed;
       } else if(res < 0) {
@@ -136,6 +159,7 @@ read_output:
       i = 0;
     }
   }
+cleanup:
   if (perr) fclose(perr);
 
   for (i = 0; i < num; ++i) {
@@ -143,8 +167,8 @@ read_output:
       Since STDIN pipes are not inherited by join process,
       close only STDOUT and STDERR streams
     */
-    fclose(workers[i].fd[STDOUT_FILENO]);
-    fclose(workers[i].fd[STDERR_FILENO]);
+    fclose(workers[i].streams[STDOUT_FILENO].fp);
+    fclose(workers[i].streams[STDERR_FILENO].fp);
   }
 
   return res;
@@ -157,9 +181,20 @@ int fork_input(worker* workers, int num) {
   size_t size;
   ssize_t written;
 
+  /* Close unused descriptors */
   for (i = 0; i < num; ++i) {
-    fclose(workers[i].fd[STDERR_FILENO]);
-    fclose(workers[i].fd[STDOUT_FILENO]);
+    close(workers[i].streams[STDERR_FILENO].fd);
+    close(workers[i].streams[STDOUT_FILENO].fd);
+  }
+
+  /* Convert stdin file descriptors to buffered streams */
+  for (i = 0; i < num; ++i) {
+    FILE* in = fdopen(workers[i].streams[STDIN_FILENO].fd, "w");
+    if (!in) {
+      num = i;
+      goto cleanup;
+    }
+    workers[i].streams[STDIN_FILENO].fp = in;
   }
 
   i = 0;
@@ -169,7 +204,7 @@ int fork_input(worker* workers, int num) {
   */
 
   while ((line = fgetln(input, &size)) != NULL) {
-    written = fwrite(line, 1, size, workers[i].fd[STDIN_FILENO]);
+    written = fwrite(line, 1, size, workers[i].streams[STDIN_FILENO].fp);
     if (written != (ssize_t) size) {
         break;
     }
@@ -180,14 +215,15 @@ int fork_input(worker* workers, int num) {
     }
   }
   
-  if ((!line && ferror(input)) || ferror(workers[i].fd[STDIN_FILENO])) {
-    res = 1;
+  if ((!line && ferror(input)) || ferror(workers[i].streams[STDIN_FILENO].fp)) {
+    res = -1;
     perror("fork_input()");
   }
 
+cleanup:
   for (i = 0; i < num; ++i) {
     /* Close write end of worker's STDIN pipe to signal the EOF to worker process */
-    fclose(workers[i].fd[STDIN_FILENO]);
+    fclose(workers[i].streams[STDIN_FILENO].fp);
   }
   return res;
 }
@@ -219,8 +255,8 @@ int run(int argc, char* argv[]) {
   */
   for (i = 0; i < numchild; ++i) {
     if (
-      -1 == clo_exec(fileno(workers[i].fd[STDOUT_FILENO]), 0) ||
-      -1 == clo_exec(fileno(workers[i].fd[STDERR_FILENO]), 0)
+      -1 == clo_exec(workers[i].streams[STDOUT_FILENO].fd, 0) ||
+      -1 == clo_exec(workers[i].streams[STDERR_FILENO].fd, 0)
     ) {
       perror("Cannot change pipe mode");
       goto cleanup;
@@ -275,6 +311,7 @@ cleanup:
 
 int main(int argc, char* argv[]) {
   int ch = 0;
+  int res = 0;
   if (argc < 2) {
     usage();
     return 1;
@@ -297,9 +334,9 @@ int main(int argc, char* argv[]) {
         break;
       case 'f':
         input = fopen(optarg, "r");
-        if (!input) {
-          perror(NULL);
-          return 1;
+        if (!input || -1 == clo_exec(fileno(input), 1)) {
+          perror("main()");
+          return -1;
         }
         break;
       case 'n':
@@ -317,5 +354,7 @@ int main(int argc, char* argv[]) {
     return 1;
   }
   argv += optind;
-  return run(argc, argv);
+  res = run(argc, argv);
+  fclose(input);
+  return res;
 }
