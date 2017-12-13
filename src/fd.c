@@ -19,12 +19,12 @@ int redirect(int src, int dst) {
 
 /* Enable/disable FD_CLOEXEC flag on file descriptor */
 int clo_exec(int fd, int enable) {
-  int flags = fcntl(fd, F_GETFL, 0);
+  int flags = fcntl(fd, F_GETFD, 0);
   if (flags < 0)
     return flags;
   if (enable)
     flags |= FD_CLOEXEC;
   else
     flags &= ~FD_CLOEXEC;
-  return fcntl(fd, F_SETFL, flags);
+  return fcntl(fd, F_SETFD, flags);
 }
