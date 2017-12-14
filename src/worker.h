@@ -7,6 +7,8 @@ license that can be found in the LICENSE file.
 #ifndef FJOIN_WORKER_H
 #define FJOIN_WORKER_H
 
+#include "bufpipe.h"
+
 #include <stdio.h>
 #include <unistd.h>
 
@@ -15,8 +17,9 @@ typedef struct _worker {
     pid_t pid;
     /* file descriptors or FILE pointers for standard streams */
     union {
-        int   fd;
-        FILE* fp;
+        int      fildes;
+        FILE*    file;
+        BUF_PIPE bpipe;
     }  streams[3];
 } worker;
 

@@ -1,2 +1,2 @@
 bin_PROGRAMS = fjoin
-fjoin_SOURCES = fd.c fjoin.c worker.c
+fjoin_SOURCES = bufpipe.c fd.c fjoin.c worker.c
