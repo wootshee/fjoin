@@ -30,6 +30,15 @@ void usage() {
   fprintf(stderr, "Usage: fjoin [-c forks] [-d delimeter] [-f input file] [-n] program [args]\n");
 }
 
+void move_back(worker* workers, int pos) {
+  if (pos == 0) {
+    return;
+  }
+  worker w = *workers;
+  memmove(workers, workers + 1, sizeof(worker) * (pos - 1));
+  workers[pos] = w;
+}
+
 ssize_t copy_message(BUF_PIPE* src, FILE* dst) {
   ssize_t r = 0;
   char* buf, *pos;
@@ -78,6 +87,7 @@ ssize_t copy_message(BUF_PIPE* src, FILE* dst) {
   if (!print_delim) {
     /* skip delimiter */
     buf_pipe_consume(src, 1);
+    ++r;
   }
   return r;
 }
@@ -86,10 +96,13 @@ int join_output(int parent_err, worker* workers, int num) {
   int i = 0, res = 0;
   char* buf = NULL;
   ssize_t size = 0;
-  int consumed = 0;
 
   BUF_PIPE perr;
 
+  /* Close unused descriptors */
+  for (i = 0; i < num; ++i) {
+    close(workers[i].streams[STDIN_FILENO].fildes);
+  }
 
   if (-1 == buf_pipe(parent_err, &perr)) {
     perror("Cannot open parent STDERR");
@@ -112,7 +125,7 @@ int join_output(int parent_err, worker* workers, int num) {
   
   i = 0;
 
-  while (res >= 0 && consumed < num + 1) {
+  while (res >= 0 && num) {
     int nfds = -1, child_message_consumed = 0;
     BUF_PIPE* out;
     BUF_PIPE* err;
@@ -120,11 +133,9 @@ int join_output(int parent_err, worker* workers, int num) {
 
     FD_ZERO(&fdread);
 
-    fprintf(stderr, "J0:%d\n", i);
-
     /* First try to consume all error messages sent so far by parent process */
     if (parent_err != -1) {
-      while ((res = copy_message(&perr, stderr) > 0)) {}
+      while ((res = copy_message(&perr, stderr) > 0)) { }
       if (res == -1) {
         if (errno == EWOULDBLOCK) {
           /* parent STDERR pipe has no messages - read it later */
@@ -141,51 +152,71 @@ int join_output(int parent_err, worker* workers, int num) {
         /* parent process STDERR has been fully consumed */
         buf_pipe_close(&perr);
         parent_err = -1;
-        ++consumed;
+        fprintf(stderr, "perr consumed\n");
         continue;
       }
     }
 
-    /* Try to consume one message from child's STDERR */
-    err = &workers[i].streams[STDERR_FILENO].bpipe;
-    res = copy_message(err, stderr);
-    if (res == 0) {
-      ++child_message_consumed;
-    } else if (res == 0) {
-      /* child's STDERR has been fully consumed */
-      move_back(&workers[i], num - i);
-      ++consumed;
-      continue;
-    } else if (errno == EWOULDBLOCK) {
-      /* child's STDERR pipe has no messages - read it later */
-      FD_SET(err->fd, &fdread);
-      if (err->fd > nfds) {
-        nfds = err->fd;
-      }
-    } else {
-      perror("Failed to read child's STDERR");
-      break;
-    }
-    
-    /* Try to consume one message from child's STDOUT */
     out = &workers[i].streams[STDOUT_FILENO].bpipe;
-    res = copy_message(out, stdout);
-    if (res == 0) {
-      ++child_message_consumed;
-    } else if (res == 0) {
-      /* child's STDOUT has been fully consumed */
-      move_back(&workers[i], num - i);
-      ++consumed;
-      continue;
-    } else if (errno == EWOULDBLOCK) {
-      /* child's STDOUT pipe has no messages - read it later */
-      FD_SET(out->fd, &fdread);
-      if (out->fd > nfds) {
-        nfds = out->fd;
+    err = &workers[i].streams[STDERR_FILENO].bpipe;
+
+    /* Try to consume one message from child's STDERR */
+    if (err->fd != -1) {
+      res = copy_message(err, stderr);
+      if (res > 0) {
+        ++child_message_consumed;
+      } else if (res == 0) {
+        /* child's STDERR has been fully consumed */
+        buf_pipe_close(err);
+        fprintf(stderr, "%d child's stderr consumed\n", i);
+        /* Wait until STDOUT pipe receives EOF */
+        if (out->fd != -1) {
+          fprintf(stderr, "waiting for %d child's stdout\n", i);
+          FD_SET(out->fd, &fdread);
+          if (out->fd > nfds) {
+            nfds = out->fd;
+          }
+          goto wait_io;
+        }
+      } else if (errno == EWOULDBLOCK) {
+        /* child's STDERR pipe has no messages - read it later */
+        FD_SET(err->fd, &fdread);
+        if (err->fd > nfds) {
+          nfds = err->fd;
+        }
+      } else {
+        perror("Failed to read child's STDERR");
+        break;
       }
-    } else {
-      perror("Failed to read child's STDOUT");
-      break;
+    }
+
+    /* Try to consume one message from child's STDOUT */
+    if (out->fd != -1) {
+      res = copy_message(out, stdout);
+      if (res > 0) {
+        ++child_message_consumed;
+      } else if (res == 0) {
+        /* child's STDOUT has been fully consumed */
+        buf_pipe_close(out);
+        fprintf(stderr, "%d child's stdout consumed\n", i);
+        if (err->fd != -1) {
+          fprintf(stderr, "waiting for %d child's stderr\n", i);
+          FD_SET(err->fd, &fdread);
+          if (err->fd > nfds) {
+            nfds = err->fd;
+          }
+          goto wait_io;
+        }
+      } else if (errno == EWOULDBLOCK) {
+        /* child's STDOUT pipe has no messages - read it later */
+        FD_SET(out->fd, &fdread);
+        if (out->fd > nfds) {
+          nfds = out->fd;
+        }
+      } else {
+        perror("Failed to read child's STDOUT");
+        break;
+      }
     }
 
     if (child_message_consumed) {
@@ -195,12 +226,17 @@ int join_output(int parent_err, worker* workers, int num) {
         i = 0;
       }
       continue;
+    } else if (err->fd == -1 && out->fd == - 1) {
+      /* child's output has been fully consumed - exclude it from I/O loop */
+      move_back(&workers[i], num - i);
+      --num;
+      continue;
     }
 
     /* Child message has not been consumed yet - wait until it arrives */
 
     nfds++;
-
+wait_io:
     while ((res = select(nfds, &fdread, NULL, NULL, NULL)) == -1) {
       switch(errno) {
         case EAGAIN: 
@@ -217,10 +253,6 @@ cleanup:
   if (parent_err != -1) buf_pipe_close(&perr);
 
   for (i = 0; i < num; ++i) {
-    /* 
-      Since STDIN pipes are not inherited by join process,
-      close only STDOUT and STDERR streams
-    */
     buf_pipe_close(&workers[i].streams[STDOUT_FILENO].bpipe);
     buf_pipe_close(&workers[i].streams[STDERR_FILENO].bpipe);
   }
@@ -277,7 +309,10 @@ int fork_input(worker* workers, int num) {
 cleanup:
   for (i = 0; i < num; ++i) {
     /* Close write end of worker's STDIN pipe to signal the EOF to worker process */
-    fclose(workers[i].streams[STDIN_FILENO].file);
+    res = fclose(workers[i].streams[STDIN_FILENO].file);
+    if (res == -1) {
+      perror("fclose() on child STDIN failed");
+    }
   }
   return res;
 }
@@ -309,6 +344,7 @@ int run(int argc, char* argv[]) {
   */
   for (i = 0; i < numchild; ++i) {
     if (
+      -1 == clo_exec(workers[i].streams[STDIN_FILENO].fildes, 0) ||
       -1 == clo_exec(workers[i].streams[STDOUT_FILENO].fildes, 0) ||
       -1 == clo_exec(workers[i].streams[STDERR_FILENO].fildes, 0)
     ) {
@@ -336,7 +372,6 @@ int run(int argc, char* argv[]) {
     close(err_pipe[1]);
     res = join_output(err_pipe[0], workers, numchild);
     fflush(stdout);
-    fprintf(stderr, "res = %d,%d\n", res, errno);
   } else {
     int r;
     close(STDOUT_FILENO);

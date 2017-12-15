@@ -14,7 +14,7 @@ license that can be found in the LICENSE file.
 typedef struct _BUF_PIPE {
     int fd;
     char buf[PIPE_BUF];
-    size_t pos;
+    size_t pos, size;
 } BUF_PIPE;
 
 int buf_pipe(int fd, BUF_PIPE* p);

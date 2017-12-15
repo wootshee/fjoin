@@ -53,9 +53,9 @@ int start_worker(int delim, char* cmd[], worker *w) {
   close(pipes[STDERR_FILENO][1]);
 
   /* Initialize standard streams */
-  w->streams[STDIN_FILENO].fd = pipes[STDIN_FILENO][1];
-  w->streams[STDOUT_FILENO].fd = pipes[STDOUT_FILENO][0];
-  w->streams[STDERR_FILENO].fd = pipes[STDERR_FILENO][0];
+  w->streams[STDIN_FILENO].fildes = pipes[STDIN_FILENO][1];
+  w->streams[STDOUT_FILENO].fildes = pipes[STDOUT_FILENO][0];
+  w->streams[STDERR_FILENO].fildes = pipes[STDERR_FILENO][0];
 
   /*
     Every child process must inherit only the file descriptors used for communication between
@@ -63,9 +63,9 @@ int start_worker(int delim, char* cmd[], worker *w) {
     must not be inherited to prevent deadlocks.
   */
   if (
-    -1 == clo_exec(w->streams[STDIN_FILENO].fd, 1) ||
-    -1 == clo_exec(w->streams[STDOUT_FILENO].fd, 1) ||
-    -1 == clo_exec(w->streams[STDERR_FILENO].fd, 1)
+    -1 == clo_exec(w->streams[STDIN_FILENO].fildes, 1) ||
+    -1 == clo_exec(w->streams[STDOUT_FILENO].fildes, 1) ||
+    -1 == clo_exec(w->streams[STDERR_FILENO].fildes, 1)
   ) {
     perror("Cannot change pipe mode");
     goto errexit;
@@ -75,7 +75,7 @@ int start_worker(int delim, char* cmd[], worker *w) {
   
 errexit:
   for (j = 0; j < i; ++j) {
-    close(w->streams[j].fd);
+    close(w->streams[j].fildes);
   }
   return -1;
 }
