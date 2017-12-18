@@ -5,8 +5,6 @@ license that can be found in the LICENSE file.
 */
 
 #include <config.h>
-
-#include "bufpipe.h"
 #include "fd.h"
 #include "worker.h"
 
@@ -63,8 +61,6 @@ int join_output(worker* workers, int num) {
   int i = 0, res = 0;
   char* buf = NULL;
   ssize_t size = 0;
-
-  BUF_PIPE perr;
 
   /* Close unused descriptors */
   for (i = 0; i < num; ++i) {
