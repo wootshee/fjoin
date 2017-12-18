@@ -20,7 +20,7 @@ typedef struct _worker {
         int      fildes;
         FILE*    file;
         BUF_PIPE bpipe;
-    }  streams[3];
+    }  streams[2];
 } worker;
 
 int start_worker(int delim, char* cmd[], worker *w);
