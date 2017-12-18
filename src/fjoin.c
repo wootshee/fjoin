@@ -28,13 +28,13 @@ void usage() {
   fprintf(stderr, "Usage: fjoin [-c forks] [-d delimeter] [-f input file] [-n] program [args]\n");
 }
 
-void move_back(worker* workers, int pos) {
-  if (pos == 0) {
+void move_back(worker* workers, int count) {
+  if (count <= 1) {
     return;
   }
   worker w = *workers;
-  memmove(workers, workers + 1, sizeof(worker) * (pos - 1));
-  workers[pos] = w;
+  memmove(workers, workers + 1, sizeof(worker) * (count - 1));
+  workers[count - 1] = w;
 }
 
 ssize_t copy_message(FILE* src, FILE* dst) {
@@ -59,8 +59,6 @@ ssize_t copy_message(FILE* src, FILE* dst) {
 
 int join_output(worker* workers, int num) {
   int i = 0, res = 0;
-  char* buf = NULL;
-  ssize_t size = 0;
 
   /* Close unused descriptors */
   for (i = 0; i < num; ++i) {
@@ -89,7 +87,7 @@ int join_output(worker* workers, int num) {
     out = workers[i].streams[STDOUT_FILENO].file;
 
     /* Try to consume one message from child's STDOUT */
-    res = copy_message(out, stdout);
+    res = (int) copy_message(out, stdout);
     if (res == 0) {
       /* child's STDOUT has been fully consumed */
       fclose(out);
