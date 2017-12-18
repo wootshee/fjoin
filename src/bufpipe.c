@@ -7,6 +7,7 @@ license that can be found in the LICENSE file.
 #include "bufpipe.h"
 
 #include <assert.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
 
@@ -17,13 +18,7 @@ int buf_pipe(int fd, BUF_PIPE* p) {
     p->fd = fd;
     p->pos = 0;
     p->size = 0;
-
-    /* switch pipe to non-blockin I/O mode */
-    res = fcntl(fd, F_GETFL, 0);
-    if (res >= 0) {
-        res = fcntl(fd, F_SETFL, res | O_NONBLOCK);
-    }
-    return res;
+    return 0;
 }
 
 int buf_pipe_empty(const BUF_PIPE* p) {
@@ -47,6 +42,9 @@ ssize_t buf_pipe_read(BUF_PIPE* p) {
     ssize_t res;
     assert(buf_pipe_empty(p));
     res = read(p->fd, p->buf, sizeof(p->buf));
+    if (res < 0 && (errno == EINTR || errno == EAGAIN)) {
+        res = read(p->fd, p->buf, sizeof(p->buf));
+    }
     if (res >= 0) {
         p->size = (size_t) res;
         p->pos = 0;
