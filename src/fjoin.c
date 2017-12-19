@@ -17,15 +17,17 @@ license that can be found in the LICENSE file.
 
 #include <sys/select.h>
 
-static int delim = '\n';
+static int input_delim = '\n';
+static int print_input_delim = 1;
+static int output_delim = '\n';
+static int print_output_delim = 1;
 static int numchild = 1;
-static int print_delim = 1;
 static FILE* input = NULL;
 static char* getdelim_buf = NULL;
 static size_t getdelim_buf_size = 0;
 
 void usage() {
-  fprintf(stderr, "Usage: fjoin [-c forks] [-d delimeter] [-f input file] [-n] program [args]\n");
+  fprintf(stderr, "Usage: fjoin [-c forks] [-d delimeter] [-f input file] [-nIO] command [args]\n");
 }
 
 void move_back(worker* workers, int count) {
@@ -37,7 +39,7 @@ void move_back(worker* workers, int count) {
   workers[count - 1] = w;
 }
 
-ssize_t copy_message(FILE* src, FILE* dst) {
+ssize_t copy_message(FILE* src, FILE* dst, int delim, int print_delim) {
   ssize_t r = 0;
   size_t size;
 
@@ -87,7 +89,7 @@ int join_output(worker* workers, int num) {
     out = workers[i].streams[STDOUT_FILENO].file;
 
     /* Try to consume one message from child's STDOUT */
-    res = (int) copy_message(out, stdout);
+    res = (int) copy_message(out, stdout, output_delim, print_output_delim);
     if (res == 0) {
       /* child's STDOUT has been fully consumed */
       fclose(out);
@@ -137,11 +139,7 @@ int fork_input(worker* workers, int num) {
     Distribute input lines to worker processes in round-robin manner
   */
 
-  while ((line = fgetln(input, &size)) != NULL) {
-    written = fwrite(line, 1, size, workers[i].streams[STDIN_FILENO].file);
-    if (written != (ssize_t) size) {
-        break;
-    }
+  while ((res = copy_message(input, workers[i].streams[STDIN_FILENO].file, input_delim, print_input_delim)) > 0) {
     /* switch to next child process */
     ++i;
     if (i == num) {
@@ -149,8 +147,7 @@ int fork_input(worker* workers, int num) {
     }
   }
   
-  if ((!line && ferror(input)) || ferror(workers[i].streams[STDIN_FILENO].file)) {
-    res = -1;
+  if (res != 0) {
     perror("fork_input()");
   }
 
@@ -180,7 +177,7 @@ int run(int argc, char* argv[]) {
     Run worker processes with their stdin, stdout and stderr redirected to pipes
   */
   for (i = 0; i < numchild; ++i) {
-    if (0 != start_worker(delim, argv, &workers[i])) {
+    if (0 != start_worker(argv, &workers[i])) {
       perror("Cannot start worker process");
       goto cleanup;
     }
@@ -246,7 +243,7 @@ int main(int argc, char* argv[]) {
   input = stdin;
 
    /* Parse command line */
-  while ((ch = getopt(argc, argv, "c:d:f:n")) != -1) {
+  while ((ch = getopt(argc, argv, "c:i:f:o:nIO")) != -1) {
     switch (ch) {
       case 'c':
         numchild = (int) strtol(optarg, NULL, 10);
@@ -255,8 +252,11 @@ int main(int argc, char* argv[]) {
           return 1;
         }
         break;
-      case 'd':
-        delim = *optarg;
+      case 'i':
+        input_delim = *optarg;
+        break;
+      case 'I':
+        print_input_delim = 0;
         break;
       case 'f':
         input = fopen(optarg, "r");
@@ -265,8 +265,11 @@ int main(int argc, char* argv[]) {
           return -1;
         }
         break;
-      case 'n':
-        print_delim = 0;
+      case 'o':
+        output_delim = *optarg;
+        break;
+      case 'O':
+        print_output_delim = 0;
         break;
       case '?':
       default:
