@@ -9,7 +9,7 @@ license that can be found in the LICENSE file.
 
 #include <stdlib.h>
 
-int start_worker(int delim, char* cmd[], worker *w) {
+int start_worker(char* cmd[], worker *w) {
   int pipes[2][2];
   int i, j;
   for (i = STDIN_FILENO; i <= STDOUT_FILENO; ++i) {
@@ -30,7 +30,7 @@ int start_worker(int delim, char* cmd[], worker *w) {
       -1 == redirect(pipes[STDOUT_FILENO][1], STDOUT_FILENO)
     ) {
       perror("Cannot create worker");
-      exit(1);
+      return 1;
     }
     close(pipes[STDIN_FILENO][1]);
     close(pipes[STDOUT_FILENO][0]);
