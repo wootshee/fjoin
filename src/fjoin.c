@@ -15,7 +15,7 @@ license that can be found in the LICENSE file.
 #include <string.h>
 #include <unistd.h>
 
-#include <sys/select.h>
+#include <sys/wait.h>
 
 static int input_delim = '\n';
 static int print_input_delim = 1;
