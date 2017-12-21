@@ -247,7 +247,7 @@ int main(int argc, char* argv[]) {
     switch (ch) {
       case 'c':
         numchild = (int) strtol(optarg, NULL, 10);
-        if (!numchild) {
+        if (!numchild && errno) {
           usage();
           return 1;
         }
