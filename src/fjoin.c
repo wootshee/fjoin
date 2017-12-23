@@ -27,7 +27,7 @@ static char* getdelim_buf = NULL;
 static size_t getdelim_buf_size = 0;
 
 void usage() {
-  fprintf(stderr, "Usage: fjoin [-c forks] [-d delimeter] [-f input file] [-nIO] command [args]\n");
+  fprintf(stderr, "Usage: fjoin [-c forks] [-d delimeter] [-f input file] [-nIO] [-0i] [-0o] command [args]\n");
 }
 
 void move_back(worker* workers, int count) {
@@ -51,7 +51,7 @@ ssize_t copy_message(FILE* src, FILE* dst, int delim, int print_delim) {
     return feof(src) ? 0 : r;
   }
 
-  size = (size_t) r - (print_delim ? 0 : 1);
+  size = (size_t) r - ((print_delim || getdelim_buf[r - 1] != delim) ? 0 : 1);
   w = fwrite(getdelim_buf, 1, size, dst);
   if (w != size) {
     return -1;
@@ -243,8 +243,21 @@ int main(int argc, char* argv[]) {
   input = stdin;
 
    /* Parse command line */
-  while ((ch = getopt(argc, argv, "c:i:f:o:nIO")) != -1) {
+  while ((ch = getopt(argc, argv, "0:c:i:f:o:nIO")) != -1) {
     switch (ch) {
+      case '0':
+        switch (*optarg) {
+          case 'i':
+            input_delim = 0;
+            break;
+          case 'o':
+            output_delim = 0;
+            break;
+          default:
+            usage();
+            return 1;
+        }
+        break;
       case 'c':
         numchild = (int) strtol(optarg, NULL, 10);
         if (!numchild) {
