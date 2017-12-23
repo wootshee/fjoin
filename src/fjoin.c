@@ -40,7 +40,7 @@ void move_back(worker* workers, int count) {
 }
 
 ssize_t copy_message(FILE* src, FILE* dst, int delim, int print_delim) {
-  ssize_t r = 0;
+  ssize_t r, w;
   size_t size;
 
   r = getdelim(&getdelim_buf, &getdelim_buf_size, delim, src);
@@ -52,8 +52,8 @@ ssize_t copy_message(FILE* src, FILE* dst, int delim, int print_delim) {
   }
 
   size = (size_t) r - (print_delim ? 0 : 1);
-  r = fwrite(getdelim_buf, 1, size, dst);
-  if (r != size) {
+  w = fwrite(getdelim_buf, 1, size, dst);
+  if (w != size) {
     return -1;
   }
   return r;
