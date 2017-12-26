@@ -1,5 +1,5 @@
 AC_CONFIG_AUX_DIR([build-aux])
-AC_INIT([fjoin], [0.1], [denis.shtyrov@gmail.com])
+AC_INIT([fjoin], [0.1], [denis.shtyrov@gmail.com], [fjoin], [https://github.com/wootshee/fjoin])
 AM_INIT_AUTOMAKE([foreign -Wall -Werror])
 AC_CONFIG_SRCDIR([src/fjoin.c])
 AC_PROG_CC

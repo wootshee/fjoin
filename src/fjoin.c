@@ -5,6 +5,7 @@ license that can be found in the LICENSE file.
 */
 
 #include <config.h>
+#include "escape.h"
 #include "fd.h"
 #include "worker.h"
 
@@ -27,7 +28,7 @@ static char* getdelim_buf = NULL;
 static size_t getdelim_buf_size = 0;
 
 void usage() {
-  fprintf(stderr, "Usage: fjoin [-c forks] [-d delimeter] [-f input file] [-nIO] command [args]\n");
+  fprintf(stderr, "Usage: fjoin [-c forks] [-i|o delimeter] [-f input file] [-nIO] command [args]\n");
 }
 
 void move_back(worker* workers, int count) {
@@ -40,7 +41,7 @@ void move_back(worker* workers, int count) {
 }
 
 ssize_t copy_message(FILE* src, FILE* dst, int delim, int print_delim) {
-  ssize_t r = 0;
+  ssize_t r, w;
   size_t size;
 
   r = getdelim(&getdelim_buf, &getdelim_buf_size, delim, src);
@@ -50,10 +51,9 @@ ssize_t copy_message(FILE* src, FILE* dst, int delim, int print_delim) {
   if (r <= 0) {
     return feof(src) ? 0 : r;
   }
-
-  size = (size_t) r - (print_delim ? 0 : 1);
-  r = fwrite(getdelim_buf, 1, size, dst);
-  if (r != size) {
+  size = (size_t) r - ((print_delim || getdelim_buf[r - 1] != delim) ? 0 : 1);
+  w = fwrite(getdelim_buf, 1, size, dst);
+  if (w != size) {
     return -1;
   }
   return r;
@@ -243,7 +243,7 @@ int main(int argc, char* argv[]) {
   input = stdin;
 
    /* Parse command line */
-  while ((ch = getopt(argc, argv, "c:i:f:o:nIO")) != -1) {
+  while ((ch = getopt(argc, argv, "0:c:i:f:o:nIO")) != -1) {
     switch (ch) {
       case 'c':
         numchild = (int) strtol(optarg, NULL, 10);
@@ -253,7 +253,10 @@ int main(int argc, char* argv[]) {
         }
         break;
       case 'i':
-        input_delim = *optarg;
+        if ((input_delim = unescape(optarg)) == 0 && errno != 0) {
+          usage();
+          return 1;
+        }
         break;
       case 'I':
         print_input_delim = 0;
@@ -266,7 +269,10 @@ int main(int argc, char* argv[]) {
         }
         break;
       case 'o':
-        output_delim = *optarg;
+        if ((output_delim = unescape(optarg)) == 0 && errno != 0) {
+          usage();
+          return 1;
+        }
         break;
       case 'O':
         print_output_delim = 0;
