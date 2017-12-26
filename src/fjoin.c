@@ -177,7 +177,7 @@ int run(int argc, char* argv[]) {
     Run worker processes with their stdin, stdout and stderr redirected to pipes
   */
   for (i = 0; i < numchild; ++i) {
-    if (0 != start_worker(argv, &workers[i])) {
+    if (0 != start_worker(argv, i + 1, numchild, &workers[i])) {
       perror("Cannot start worker process");
       goto cleanup;
     }

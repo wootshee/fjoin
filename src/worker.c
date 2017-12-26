@@ -9,14 +9,26 @@ license that can be found in the LICENSE file.
 
 #include <stdlib.h>
 
-int start_worker(char* cmd[], worker *w) {
+int start_worker(char* cmd[], int num, int total, worker *w) {
   int pipes[2][2];
+  char buf[16];
   int i, j;
   for (i = STDIN_FILENO; i <= STDOUT_FILENO; ++i) {
     if (-1 == pipe(pipes[i])) {
       perror("Cannot create pipe");
       goto errexit;
     }
+  }
+  /* Report to a child process its relative number and total number of child processes */
+  snprintf(buf, sizeof(buf) / sizeof(*buf), "%d", num);
+  if (-1 == setenv("FJOIN_CHILD", buf, 1)) {
+    perror("Cannot set FJOIN_CHILD environment variable");
+    goto errexit;
+  }
+  snprintf(buf, sizeof(buf) / sizeof(*buf), "%d", total);
+  if (-1 == setenv("FJOIN_CHILDREN", buf, 1)) {
+    perror("Cannot set FJOIN_CHILDREN environment variable");
+    goto errexit;
   }
   w->pid = fork();
   if (w->pid == 0) {
@@ -42,7 +54,8 @@ int start_worker(char* cmd[], worker *w) {
   /*
     Parent process
   */
-
+  unsetenv("FJOIN_CHILDREN");
+  unsetenv("FJOIN_CHILD");
   /* Close unused ends of pipes */
   close(pipes[STDIN_FILENO][0]);
   close(pipes[STDOUT_FILENO][1]);

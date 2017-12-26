@@ -20,6 +20,6 @@ typedef struct _worker {
     }  streams[2];
 } worker;
 
-int start_worker(char* cmd[], worker *w);
+int start_worker(char* cmd[], int num, int total, worker *w);
 
 #endif
