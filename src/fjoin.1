@@ -28,194 +28,160 @@
 .Nd fork, filter and join text stream
 .Sh SYNOPSIS
 .Nm
-.Op Fl n
 .Op Fl c Ar number
-.Op Fl d Ar delimiter
 .Op Fl f Ar file
+.Op Fl e Ar char
+.Op Fl E
+.Op Fl i Ar char
+.Op Fl I
+.Op Fl o Ar char
+.Op Fl O
+.Op Fl x
+.Op Fl -
 .Ar command
 .Op Ar args
 .Sh DESCRIPTION
 The
 .Nm
-utility distributes lines of text received on standard input to a number of child processes
-running the specified command and merges their output back to standard output in round robin
-manner.
-.Pp
-The following options are available:
+utility distributes text records received on standard input to a number of child processes running the specified
+command and merges their output back to standard output as if the input is processed by a pipeline running only
+a single instance of that command.
+.Sh OPTIONS
+.Nm
+accepts the following options:
 .Bl -tag -width Ds
 .It Fl c
 Specifies the number of child processes.
+.It Fl e
+Specifies standard error record
+.Ar separator
+character (new line by default).
+.It Fl E
+Exclude separators from standard error output.
 .It Fl f
-Read input lines from a
+Read input records from a
 .Ar file
 instead of standard input.
 .It Fl i
 Specifies input
-.Ar delimiter
+.Ar separator
 character (new line by default).
 .It Fl I
-Exclude input delimiter characters from sending to child processes.
+Exclude input separator characters from sending to child processes.
 .It Fl o
 Specifies output
-.Ar delimiter
+.Ar separator
 character (new line by default).
 .It Fl O
-Exclude output delimiters from output.
-.Ar string1
-from the input.
+Exclude output separators from output.
+.It Fl x
+Enable serialization of children's standard error streams.
 .El
+.Ss Separator Character Format
+All options accepting the separator character must be followed either by a single character or C escape sequence string
+(`\en', `\e000', `\excc', etc).
+.Sh INPUT PROCESSING
+.Nm
+treats it's input as a stream of records separated by input separator character (`\en' by default) and produces the stream
+of output records separated by output record separator character (`\en' by default). The output of separator characters can
+be suppressed.
 .Pp
-Input lines are distributed to child processes in round-robin manner. The output of child process is combined
-in the same order as they received their input. For example, if there are two child processes, the first input
-line is sent to first child process, the second to second child, the third to first child, the fourth to second,
-etc. The output is assembled in the same way - the first output line of the first child becomes
-the first output line of
+Input records are distributed to child processes in round-robin manner. The output of child processes is joined in the
+same order as they receive their input. For example, if there are two child processes, the first input record is sent
+to a first child process, the second \(em to the second child, the third \(em to first child, the fourth \(em to second child,
+etc. The output is assembled in the same way \(em the first output record of the first child becomes first output record of
+joined output stream, the first output record of the second child becomes the second output record of joined stream,
+the second output record of the first child becomes the third output record, the second output record of the second
+child \(em the fourth output record, etc.
+.Pp
+Every child process must always produce exactly one output record, including the empty one (i.e. consisting of only
+a separator character), for each input record. Otherwise, the behavior is undefined and may result in a deadlock.
+.Pp
+The output of joined output stream is fully deterministic and matches the output of a pipeline with a single child
+process.
+.Ss Input Record Numbering
+Since input records are distributed among child processes, the order in which child processes receive their input
+records does not match the order of input records of unforked input stream. To workaround this issue,
 .Nm
-, the first output line of the second child becomes the second output line of
-.Nm
-, the second output line of the first child becomes the third output line,
-the second output line of the second child becomes the fourth output line, etc.
-.El
-.Sh ENVIRONMENT
-The
-.Ev LANG , LC_ALL , LC_CTYPE
+sets
+.Ev FJOIN_CHILD
 and
-.Ev LC_COLLATE
-environment variables affect the execution of
+.Ev FJOIN_CHILDREN
+environment variables (refer to
+.Sx ENVIRONMENT
+section). A child process can derive the number of input record in unforked
+input stream by simple formula:
+.Pp
+.D1 (x - 1) * FJOIN_CHILDREN + FJOIN_CHILD
+.Pp
+where
+.Ar x
+is a record number within child process input stream.
+.Sh STANDARD ERROR PROCESSING
+By default, child processes share the standard error stream with
+.Nm .
+The output of child processes sent to standard error stream is not serialized. This means that if two or more child
+processes write to standard error stream simultaneously, they can produce garbled output.
+.Pp
+.Fl x
+flag enables serialization of messages sent by child processes to their standard error streams. When this flag is enabled,
 .Nm
-as described in
-.Xr environ 7 .
+expects that every child produces exactly one error record separated by separator character (specified by
+.Fl e
+option) for every input record. If no error record is produced for input record, child process must send an empty error
+record consisting of a single separator character to it's standard error stream.
+.Pp
+Separator characters can be excluded from final standard error output by using the
+.Fl E
+flag.
+.Pp
+The serialialized error stream is fully deterministic and matches the standard error stream produced by a pipeline with
+a single child process.
+.Sh SPECIAL CONSIDERATIONS FOR BUFFERED I/O
+If child processes use buffered I/O on their standard output streams, a situation may arise when some child processes
+produce mostly empty or large amounts of very short output records whereas others produce many large records. In such
+scenario, child processes producing short records might keep the data in their output I/O buffers for relatively long
+periods of time. At the same time, the processes that produce long output records may need to flush their I/O buffers
+more frequently.
+.Pp
+Since
+.Nm
+reads the output of it's child processes sequentially in round-robin manner, it might block on reading the output of
+a child process if current child process does not flush it's output buffer leading to a deadlock. To avoid it, a child
+processes might need to flush their output buffers manually if they produce too many short records.
+.Sh ENVIRONMENT
+Every child process executed by
+.Nm
+is numbered and receives it's relative number and total number of child processes in
+.Ev FJOIN_CHILD
+and
+.Ev FJOIN_CHILDREN
+environment variables.
 .Sh EXIT STATUS
 .Ex -std
 .Sh EXAMPLES
-The following examples are shown as given to the shell:
+Filter file
+.Ar myfile.txt
+through AWK script
+.Ar script.awk
+by 4 instances of AWK in parallel.
 .Pp
-Create a list of the words in file1, one per line, where a word is taken to
-be a maximal string of letters.
+.D1 Li "fjoin -c 4 -f myfile.txt -- awk -f script.awk"
 .Pp
-.D1 Li "tr -cs \*q[:alpha:]\*q \*q\en\*q < file1"
+Filter input lines through a slow Python script that might remove some lines from it's output using null character
+as output record separator. Speed up input processing by running 8 instances of Python simultaneously.
 .Pp
-Translate the contents of file1 to upper-case.
+.D1 Li "fjoin -c 8 -O -o'\e000' -- python script.py"
 .Pp
-.D1 Li "tr \*q[:lower:]\*q \*q[:upper:]\*q < file1"
+Filter large file through 2 parallel instances of grep looking for lines containing
+.Ar pattern
 .Pp
-(This should be preferred over the traditional
-.Ux
-idiom of
-.Dq Li "tr a-z A-Z" ,
-since it works correctly in all locales.)
-.Pp
-Strip out non-printable characters from file1.
-.Pp
-.D1 Li "tr -cd \*q[:print:]\*q < file1"
-.Pp
-Remove diacritical marks from all accented variants of the letter
-.Ql e :
-.Pp
-.Dl "tr \*q[=e=]\*q \*qe\*q"
-.Sh COMPATIBILITY
-Previous
-.Fx
-implementations of
+.D1 Li "fjoin -c 2 -f file -- grep 'pattern'"
+.Sh BUGS
 .Nm
-did not order characters in range expressions according to the current
-locale's collation order, making it possible to convert unaccented Latin
-characters (esp.\& as found in English text) from upper to lower case using
-the traditional
-.Ux
-idiom of
-.Dq Li "tr A-Z a-z" .
-Since
-.Nm
-now obeys the locale's collation order, this idiom may not produce
-correct results when there is not a 1:1 mapping between lower and
-upper case, or when the order of characters within the two cases differs.
-As noted in the
-.Sx EXAMPLES
-section above, the character class expressions
-.Dq Li [:lower:]
-and
-.Dq Li [:upper:]
-should be used instead of explicit character ranges like
-.Dq Li a-z
-and
-.Dq Li A-Z .
-.Pp
-System V has historically implemented character ranges using the syntax
-.Dq Li [c-c]
-instead of the
-.Dq Li c-c
-used by historic
-.Bx
-implementations and
-standardized by POSIX.
-System V shell scripts should work under this implementation as long as
-the range is intended to map in another range, i.e., the command
-.Dq Li "tr [a-z] [A-Z]"
-will work as it will map the
-.Ql \&[
-character in
-.Ar string1
-to the
-.Ql \&[
-character in
-.Ar string2 .
-However, if the shell script is deleting or squeezing characters as in
-the command
-.Dq Li "tr -d [a-z]" ,
-the characters
-.Ql \&[
-and
-.Ql \&]
-will be
-included in the deletion or compression list which would not have happened
-under a historic System V implementation.
-Additionally, any scripts that depended on the sequence
-.Dq Li a-z
-to
-represent the three characters
-.Ql a ,
-.Ql \-
-and
-.Ql z
-will have to be
-rewritten as
-.Dq Li a\e-z .
-.Pp
-The
-.Nm
-utility has historically not permitted the manipulation of NUL bytes in
-its input and, additionally, stripped NUL's from its input stream.
-This implementation has removed this behavior as a bug.
-.Pp
-The
-.Nm
-utility has historically been extremely forgiving of syntax errors,
-for example, the
-.Fl c
-and
-.Fl s
-options were ignored unless two strings were specified.
-This implementation will not permit illegal syntax.
-.Sh STANDARDS
-The
-.Nm
-utility conforms to
-.St -p1003.1-2001 .
-.Pp
-It should be noted that the feature wherein the last character of
-.Ar string2
-is duplicated if
-.Ar string2
-has less characters than
-.Ar string1
-is permitted by POSIX but is not required.
-Shell scripts attempting to be portable to other POSIX systems should use
-the
-.Dq Li [#*]
-convention instead of relying on this behavior.
-The
-.Fl u
-option is an extension to the
-.St -p1003.1-2001
-standard.
+cannot be used with commands that depend on the order of input records (hash generators, data compression
+programs, uniq, etc) or change the order of input records in their output (sort).
+.Sh AUTHORS
+Written by Denis Shtyrov
+.Sh REPORTING BUGS
+Report bugs to <denis.shtyrov@gmail.com>
