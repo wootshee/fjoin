@@ -17,9 +17,9 @@ typedef struct _worker {
     union {
         int      fildes;
         FILE*    file;
-    }  streams[2];
+    }  streams[3];
 } worker;
 
-int start_worker(char* cmd[], int num, int total, worker *w);
+int start_worker(char* cmd[], int num, int total, int serialize_stderr, worker *w);
 
 #endif

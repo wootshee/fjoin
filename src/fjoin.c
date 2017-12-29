@@ -11,6 +11,7 @@ license that can be found in the LICENSE file.
 
 #include <errno.h>
 #include <fcntl.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -22,13 +23,16 @@ static int input_delim = '\n';
 static int print_input_delim = 1;
 static int output_delim = '\n';
 static int print_output_delim = 1;
+static int error_delim = '\n';
+static int print_error_delim = 1;
+static int serialize_stderr = 0;
 static int numchild = 1;
 static FILE* input = NULL;
 static char* getdelim_buf = NULL;
 static size_t getdelim_buf_size = 0;
 
 void usage() {
-  fprintf(stderr, "Usage: fjoin [-c forks] [-i|o delimeter] [-f input file] [-nIO] command [args]\n");
+  fprintf(stderr, "Usage: fjoin [-c forks] [-e|i|o delimeter] [-f input file] [-nxEIO] command [args]\n");
 }
 
 void move_back(worker* workers, int count) {
@@ -59,23 +63,26 @@ ssize_t copy_message(FILE* src, FILE* dst, int delim, int print_delim) {
   return r;
 }
 
-int join_output(worker* workers, int num) {
+int join_output(worker* workers, int num, int src, FILE* dst, int output_delim, int print_output_delim) {
   int i = 0, res = 0;
+  const int close_fd = (src == STDOUT_FILENO ? STDERR_FILENO: STDOUT_FILENO);
 
   /* Close unused descriptors */
   for (i = 0; i < num; ++i) {
     close(workers[i].streams[STDIN_FILENO].fildes);
+    if (workers[i].streams[close_fd].fildes != -1)
+      close(workers[i].streams[close_fd].fildes);
   }
 
   for (i = 0; i < num; i++) {
     /* convert pipe descriptors to buffered pipe streams */
-    FILE* out = fdopen(workers[i].streams[STDOUT_FILENO].fildes, "r");
+    FILE* out = fdopen(workers[i].streams[src].fildes, "r");
 
     if (!out) {
       num = i;
       goto cleanup;
     }
-    workers[i].streams[STDOUT_FILENO].file = out;
+    workers[i].streams[src].file = out;
   }
   
   i = 0;
@@ -86,18 +93,18 @@ int join_output(worker* workers, int num) {
     if (i >= num) {
       i = 0;
     }
-    out = workers[i].streams[STDOUT_FILENO].file;
+    out = workers[i].streams[src].file;
 
     /* Try to consume one message from child's STDOUT */
-    res = (int) copy_message(out, stdout, output_delim, print_output_delim);
+    res = (int) copy_message(out, dst, output_delim, print_output_delim);
     if (res == 0) {
-      /* child's STDOUT has been fully consumed */
+      /* child's output has been fully consumed */
       fclose(out);
       move_back(&workers[i], num - i);
       --num;
       continue;
     } else if (res < 0) {
-      perror("Failed to read child's STDOUT");
+      perror("Failed to copy child's output");
       break;
     }
     ++i;
@@ -105,7 +112,7 @@ int join_output(worker* workers, int num) {
 
 cleanup:
   for (i = 0; i < num; ++i) {
-    fclose(workers[i].streams[STDOUT_FILENO].file);
+    fclose(workers[i].streams[src].file);
   }
 
   return res;
@@ -162,10 +169,32 @@ cleanup:
   return res;
 }
 
+int wait_child(pid_t pid) {
+  int r, res = 0;
+  pid_t p;
+
+  for (
+    p = waitpid(pid, &r, 0);
+    p == -1 && errno == EINTR;
+    p = waitpid(pid, &r, 0)
+  );
+    
+  if (p == -1) {
+    perror("waitpid() failed");
+    res = -1;
+  } else if (!(WIFEXITED(r))) {
+    res = 1;
+  } else {
+    res = WEXITSTATUS(r);
+  }
+  return res;
+}
+
 int run(int argc, char* argv[]) {
   int i;
   int res = 1;
-  pid_t pid_join = -1;
+  int status = 0;
+  pid_t pid_join_output = -1, pid_join_error = -1;
 
   worker* workers = (worker*) malloc(numchild * sizeof(worker));
   if (!workers) {
@@ -177,7 +206,7 @@ int run(int argc, char* argv[]) {
     Run worker processes with their stdin, stdout and stderr redirected to pipes
   */
   for (i = 0; i < numchild; ++i) {
-    if (0 != start_worker(argv, i + 1, numchild, &workers[i])) {
+    if (0 != start_worker(argv, i + 1, numchild, serialize_stderr, &workers[i])) {
       perror("Cannot start worker process");
       goto cleanup;
     }
@@ -191,7 +220,7 @@ int run(int argc, char* argv[]) {
       -1 == clo_exec(workers[i].streams[STDIN_FILENO].fildes, 0) ||
       -1 == clo_exec(workers[i].streams[STDOUT_FILENO].fildes, 0)
     ) {
-      perror("Cannot change pipe mode");
+      perror("Cannot change pipe's mode");
       goto cleanup;
     }
   }
@@ -200,27 +229,55 @@ int run(int argc, char* argv[]) {
     Create child process that joins the stdout streams of worker processes
   */
 
-  if (0 == (pid_join = fork())) {
+  if (0 == (pid_join_output = fork())) {
     close(STDIN_FILENO);
-    res = join_output(workers, numchild);
+    res = join_output(workers, numchild, STDOUT_FILENO, stdout, output_delim, print_output_delim);
     fflush(stdout);
-  } else {
-    int r;
-    pid_t p;
-    close(STDOUT_FILENO);
-    res = fork_input(workers, numchild);
-    for (
-      p = waitpid(pid_join, &r, 0);
-      p == -1 && errno == EINTR;
-      p = waitpid(pid_join, &r, 0)
-    );
-    if (p == -1) {
-      perror("waitpid() failed");
+  } else if (pid_join_output == -1) {
+    perror("Cannot fork child process");
+    res = -1;
+  } else if (serialize_stderr) {
+    /*
+      Create child process that joins the stderr streams of worker processes
+    */
+    if (0 == (pid_join_error = fork())) {
+      close(STDIN_FILENO);
+      close(STDOUT_FILENO);
+      res = join_output(workers, numchild, STDERR_FILENO, stderr, error_delim, print_error_delim);
+      fflush(stderr);
+    } else if (pid_join_error == -1) {
+      perror("Cannot fork child process");
       res = -1;
-    } else if (!(WIFEXITED(r))) {
-      res = 1;
-    } else if (WEXITSTATUS(r) != 0) {
-      res = WEXITSTATUS(r);
+      if (-1 == kill(pid_join_output, SIGKILL)) {
+        perror("Failed to send KILL signal to child process");
+        exit(1);
+      }
+    } else {
+      res = 0;
+    }
+  } else {
+    res = 0;
+  }
+
+  if (pid_join_output > 0 && pid_join_error != 0) {
+    if (res == 0) {
+      close(STDOUT_FILENO);
+      res = fork_input(workers, numchild);
+    }
+
+    if (pid_join_error > 0) {
+      status = wait_child(pid_join_error);
+      if (status)
+        res = status;
+    }
+    status = wait_child(pid_join_output);
+    if (status && !res)
+      res = status;
+
+    for (i = 0; i < numchild; ++i) {
+      status = wait_child(workers[i].pid);
+      if (status && !res)
+        res = status;
     }
   }
 
@@ -243,7 +300,7 @@ int main(int argc, char* argv[]) {
   input = stdin;
 
    /* Parse command line */
-  while ((ch = getopt(argc, argv, "0:c:i:f:o:nIO")) != -1) {
+  while ((ch = getopt(argc, argv, "0:c:i:f:o:nIOx")) != -1) {
     switch (ch) {
       case 'c':
         numchild = (int) strtol(optarg, NULL, 10);
@@ -276,6 +333,9 @@ int main(int argc, char* argv[]) {
         break;
       case 'O':
         print_output_delim = 0;
+        break;
+      case 'x':
+        serialize_stderr = 1;
         break;
       case '?':
       default:
