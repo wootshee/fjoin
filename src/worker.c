@@ -9,8 +9,9 @@ license that can be found in the LICENSE file.
 
 #include <stdlib.h>
 
-int start_worker(char* cmd[], worker *w, int serialize_stderr) {
+int start_worker(char* cmd[], int num, int total, int serialize_stderr, worker *w) {
   int pipes[3][2] = {-1};
+  char buf[16];
   int i;
   int j = serialize_stderr ? STDERR_FILENO : STDOUT_FILENO;
   for (i = STDIN_FILENO; i <= j; ++i) {
@@ -18,6 +19,17 @@ int start_worker(char* cmd[], worker *w, int serialize_stderr) {
       perror("Cannot create pipe");
       goto errexit;
     }
+  }
+  /* Report to a child process its relative number and total number of child processes */
+  snprintf(buf, sizeof(buf) / sizeof(*buf), "%d", num);
+  if (-1 == setenv("FJOIN_CHILD", buf, 1)) {
+    perror("Cannot set FJOIN_CHILD environment variable");
+    goto errexit;
+  }
+  snprintf(buf, sizeof(buf) / sizeof(*buf), "%d", total);
+  if (-1 == setenv("FJOIN_CHILDREN", buf, 1)) {
+    perror("Cannot set FJOIN_CHILDREN environment variable");
+    goto errexit;
   }
   w->pid = fork();
   if (w->pid == 0) {
@@ -46,7 +58,8 @@ int start_worker(char* cmd[], worker *w, int serialize_stderr) {
   /*
     Parent process
   */
-
+  unsetenv("FJOIN_CHILDREN");
+  unsetenv("FJOIN_CHILD");
   /* Close unused ends of pipes */
   close(pipes[STDIN_FILENO][0]);
   close(pipes[STDOUT_FILENO][1]);
