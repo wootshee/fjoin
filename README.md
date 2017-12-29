@@ -29,12 +29,12 @@ fjoin accepts the following options:
      -x      Enable serialization of children's standard error streams.
 
 ### Separator Character Format
-All options accepting the separator character must be followed either by a single character or C escape sequence string (`\n', `\000', `\xcc', etc).
+All options accepting the separator character must be followed either by a single character or C escape sequence string ('\n', '\000', '\xcc', etc).
 
 ## INPUT PROCESSING
-fjoin treats it's input as a stream of records separated by input separator character (`\n' by default) and produces the stream of output records separated by output record separator character (`\n' by default). The output of separator characters can be suppressed.
+fjoin treats it's input as a stream of records separated by input separator character ('\n' by default) and produces the stream of output records separated by output record separator character ('\n' by default). The output of separator characters can be suppressed.
 
-Input records are distributed to child processes in round-robin manner. The output of child processes is joined in the same order as they receive their input. For example, if there are two child processes, the first input record is sent to a first child process, the second -- to the second child, the third -- to first child, the fourth -- to second child, etc. The output is assembled in the same way -- the first output record of the first child becomes first output record of joined output stream, the first output record of the second child becomes the second output record of joined stream, the second output record of the first child becomes the third output record, the second output record of the second child -- the fourth output record, etc.
+Input records are distributed to child processes in round-robin manner. The output of child processes is joined in the same order as they receive their input. For example, if there are two child processes, the first input record is sent to a first child process, the second — to the second child, the third — to first child, the fourth — to second child, etc. The output is assembled in the same way — the first output record of the first child becomes first output record of joined output stream, the first output record of the second child becomes the second output record of joined stream, the second output record of the first child becomes the third output record, the second output record of the second child — the fourth output record, etc.
 
 Every child process must always produce exactly one output record, including the empty one (i.e. consisting of only a separator character), for each input record. Otherwise, the behavior is undefined and may result in a deadlock.
 
