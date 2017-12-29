@@ -169,9 +169,31 @@ cleanup:
   return res;
 }
 
+int wait_child(pid_t pid) {
+  int r, res = 0;
+  pid_t p;
+
+  for (
+    p = waitpid(pid, &r, 0);
+    p == -1 && errno == EINTR;
+    p = waitpid(pid, &r, 0)
+  );
+    
+  if (p == -1) {
+    perror("waitpid() failed");
+    res = -1;
+  } else if (!(WIFEXITED(r))) {
+    res = 1;
+  } else {
+    res = WEXITSTATUS(r);
+  }
+  return res;
+}
+
 int run(int argc, char* argv[]) {
   int i;
   int res = 1;
+  int status = 0;
   pid_t pid_join_output = -1, pid_join_error = -1;
 
   worker* workers = (worker*) malloc(numchild * sizeof(worker));
@@ -211,14 +233,14 @@ int run(int argc, char* argv[]) {
     close(STDIN_FILENO);
     res = join_output(workers, numchild, STDOUT_FILENO, stdout, output_delim, print_output_delim);
     fflush(stdout);
-  } else if (pid_join == -1) {
+  } else if (pid_join_output == -1) {
     perror("Cannot fork child process");
     res = -1;
   } else if (serialize_stderr) {
     /*
       Create child process that joins the stderr streams of worker processes
     */
-    if (0 == (pid_join_error = fork()))) {
+    if (0 == (pid_join_error = fork())) {
       close(STDIN_FILENO);
       close(STDOUT_FILENO);
       res = join_output(workers, numchild, STDERR_FILENO, stderr, error_delim, print_error_delim);
@@ -228,7 +250,7 @@ int run(int argc, char* argv[]) {
       res = -1;
       if (-1 == kill(pid_join_output, SIGKILL)) {
         perror("Failed to send KILL signal to child process");
-        exit(-1);
+        exit(1);
       }
     } else {
       res = 0;
@@ -237,28 +259,25 @@ int run(int argc, char* argv[]) {
     res = 0;
   }
 
-  if (pid_join_output > 0) {
-    int r;
-    pid_t p;
-
+  if (pid_join_output > 0 && pid_join_error != 0) {
     if (res == 0) {
       close(STDOUT_FILENO);
       res = fork_input(workers, numchild);
     }
 
-    for (
-      p = waitpid(pid_join, &r, 0);
-      p == -1 && errno == EINTR;
-      p = waitpid(pid_join, &r, 0)
-    );
-    
-    if (p == -1) {
-      perror("waitpid() failed");
-      res = -1;
-    } else if (!(WIFEXITED(r))) {
-      res = 1;
-    } else if (WEXITSTATUS(r) != 0) {
-      res = WEXITSTATUS(r);
+    if (pid_join_error > 0) {
+      status = wait_child(pid_join_error);
+      if (status)
+        res = status;
+    }
+    status = wait_child(pid_join_output);
+    if (status && !res)
+      res = status;
+
+    for (i = 0; i < numchild; ++i) {
+      status = wait_child(workers[i].pid);
+      if (status && !res)
+        res = status;
     }
   }
 
@@ -281,7 +300,7 @@ int main(int argc, char* argv[]) {
   input = stdin;
 
    /* Parse command line */
-  while ((ch = getopt(argc, argv, "0:c:i:f:o:nIO")) != -1) {
+  while ((ch = getopt(argc, argv, "0:c:i:f:o:nIOx")) != -1) {
     switch (ch) {
       case 'c':
         numchild = (int) strtol(optarg, NULL, 10);
@@ -314,6 +333,9 @@ int main(int argc, char* argv[]) {
         break;
       case 'O':
         print_output_delim = 0;
+        break;
+      case 'x':
+        serialize_stderr = 1;
         break;
       case '?':
       default:
