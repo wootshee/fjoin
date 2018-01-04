@@ -32,7 +32,7 @@ static char* getdelim_buf = NULL;
 static size_t getdelim_buf_size = 0;
 
 void usage() {
-  fprintf(stderr, "Usage: fjoin [-c forks] [-e|i|o delimeter] [-f input file] [-nxEIO] command [args]\n");
+  fprintf(stderr, "Usage: fjoin [-c forks] [-e|i|o delimeter] [-f input file] [-xEIO] command [args]\n");
 }
 
 void move_back(worker* workers, int count) {
@@ -300,7 +300,7 @@ int main(int argc, char* argv[]) {
   input = stdin;
 
    /* Parse command line */
-  while ((ch = getopt(argc, argv, "0:c:i:f:o:nIOx")) != -1) {
+  while ((ch = getopt(argc, argv, "0:c:e:i:f:o:EIOx")) != -1) {
     switch (ch) {
       case 'c':
         numchild = (int) strtol(optarg, NULL, 10);
@@ -308,6 +308,15 @@ int main(int argc, char* argv[]) {
           usage();
           return 1;
         }
+        break;
+      case 'e':
+        if ((error_delim = unescape(optarg)) == 0 && errno != 0) {
+          usage();
+          return 1;
+        }
+        break;
+      case 'E':
+        print_error_delim = 0;
         break;
       case 'i':
         if ((input_delim = unescape(optarg)) == 0 && errno != 0) {
