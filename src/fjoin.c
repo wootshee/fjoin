@@ -228,14 +228,14 @@ int run(int argc, char* argv[]) {
   /*
     Create child process that joins the stdout streams of worker processes
   */
-
+  res = 0;
   if (0 == (pid_join_output = fork())) {
     close(STDIN_FILENO);
     res = join_output(workers, numchild, STDOUT_FILENO, stdout, output_delim, print_output_delim);
     fflush(stdout);
   } else if (pid_join_output == -1) {
     perror("Cannot fork child process");
-    res = -1;
+    res = 1;
   } else if (serialize_stderr) {
     /*
       Create child process that joins the stderr streams of worker processes
@@ -247,16 +247,12 @@ int run(int argc, char* argv[]) {
       fflush(stderr);
     } else if (pid_join_error == -1) {
       perror("Cannot fork child process");
-      res = -1;
+      res = 1;
       if (-1 == kill(pid_join_output, SIGKILL)) {
         perror("Failed to send KILL signal to child process");
         exit(1);
       }
-    } else {
-      res = 0;
     }
-  } else {
-    res = 0;
   }
 
   if (pid_join_output > 0 && pid_join_error != 0) {
