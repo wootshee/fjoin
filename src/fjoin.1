@@ -147,7 +147,7 @@ more frequently.
 Since
 .Nm
 reads the output of it's child processes sequentially in round-robin manner, it might block on reading the output of
-a child process if current child process does not flush it's output buffer leading to a deadlock. To avoid it, a child
+a child process if current child process does not flush it's output buffer leading to a deadlock. To avoid it, child
 processes might need to flush their output buffers manually if they produce too many short records.
 .Sh ENVIRONMENT
 Every child process executed by
