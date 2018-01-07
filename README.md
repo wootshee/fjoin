@@ -61,7 +61,7 @@ The serialialized error stream is fully deterministic and matches the standard e
 ## SPECIAL CONSIDERATIONS FOR BUFFERED I/O
 If child processes use buffered I/O on their standard output streams, a situation may arise when some child processes produce mostly empty or large amounts of very short output records whereas others produce many large records. In such scenario, child processes producing short records might keep the data in their output I/O buffers for relatively long periods of time. At the same time, the processes that produce long output records may need to flush their I/O buffers more frequently.
 
-Since fjoin reads the output of it's child processes sequentially in round-robin manner, it might block on reading the output of a child process if current child process does not flush it's output buffer leading to a deadlock. To avoid it, a child processes might need to flush their output buffers manually if they produce too many short records.
+Since fjoin reads the output of it's child processes sequentially in round-robin manner, it might block on reading the output of a child process if current child process does not flush it's output buffer leading to a deadlock. To avoid it, child processes might need to flush their output buffers manually if they produce too many short records.
 
 ## ENVIRONMENT
 Every child process executed by fjoin is numbered and receives it's relative number and total number of child processes in FJOIN_CHILD and FJOIN_CHILDREN environment variables.
